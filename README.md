@@ -4,20 +4,17 @@
 
 `IEEE802_11a_tx.m` 当前完成 6 Mbps 模式下从测试 PSDU 到 DATA OFDM 时域波形：生成测试字节、追加 CRC-32 FCS、添加 SERVICE/TAIL 和 OFDM PAD、加扰、卷积编码、交织、BPSK 调制、数据子载波映射、导频插入、2 倍频域补零上采样、128 点 IFFT 和循环前缀添加。
 
-脚本输出的是不含 PLCP 前导码和 SIGNAL 字段的 DATA 符号波形，因此还不是完整的 IEEE 802.11a PPDU。
-
 ## 2. 运行环境
 
-- 提供 `int2bit` 函数的 MATLAB 版本。
+- MATLAB。
 - Communications Toolbox（提供 `int2bit`、`poly2trellis` 和 `convenc`）。
+- Signal Processing Toolbox（提供 `pwelch` 和 `hann`）。
 - 在 MATLAB 当前文件夹切换到本项目目录，然后运行：
 
   ```matlab
   IEEE802_11a_tx
   ```
-
-运行后，`payload_data_bits`、`crc_value`、`crc_bits_row`、`payload_bits`、`padded_bits`、`scrambled_bits`、`coded_bits`、`interleaved_bits`、`BPSK_data`、`pilot_polarity_sequence`、`pilot_subcarrier_symbols`、`frequency_domain_symbols`、`upsampled_frequency_domain_symbols`、`time_domain_symbols`、`ofdm_symbols_with_cp` 和 `transmit_waveform` 等变量会保留在工作区。各矩阵按列存放 OFDM 符号；`transmit_waveform` 是按符号顺序串行化后的复数行向量。
-
+  
 ## 3. 系统参数
 
 | 参数 | 默认值 | 说明 |
@@ -63,11 +60,11 @@ FCS 只覆盖 PSDU 数据，不覆盖 SERVICE、TAIL 或 OFDM PAD。当前示例
 
 ## 6. 加扰实现
 
-加扰器使用 7 位线性反馈移位寄存器，生成多项式为 `x^7 + x^4 + 1`。每个时钟周期将寄存器第  7 位与第 4 位异或得到扰码位，然后移位并将反馈位移入寄存器的 x1；扰码位再与对应的数据位异或。先处理生成全部的加扰序列，数据最后和整个序列进行异或。最后恢复 TAIL 位，全部置零。
+加扰器使用 7 位线性反馈移位寄存器，生成多项式为 `x^7 + x^4 + 1`。每个时钟周期将寄存器第  7 位与第 4 位异或得到扰码位，然后移位并将反馈位移入寄存器的 x1；扰码位再与对应的数据位异或。先处理生成全部的加扰序列，数据最后和整个序列进行异或。
 
 ## 7. 卷积编码
 
-卷积编码使用约束长度 `K=7`、生成多项式 `[133 171]`（八进制），码率为 1/2。输入流中已有 6 个全零 TAIL 位，用于将编码器状态归零；因此本示例的 8,376 个输入位编码为 16,752 个输出位。
+卷积编码使用约束长度 `K=7`、生成多项式 `[133 171]`（八进制），码率为 1/2。
 
 ## 8. 交织
 
@@ -95,7 +92,7 @@ j = s × floor(i / s) + (i + N_CBPS - floor(16 × i / N_CBPS)) mod s
 
 采样率和频域插值方法参考《通信原理课程设计实验指导书2023》第 1.2.3 和 1.5.1 节。该波形尚未拼接短/长训练序列或 SIGNAL 字段，也未执行 DAC 量化和射频发送。
 
-## 11. 可视化
+## 11. 绘图
 
 脚本末尾的“绘图”部分生成五张 MATLAB 图窗：
 
@@ -103,4 +100,4 @@ j = s × floor(i / s) + (i + N_CBPS - floor(16 × i / N_CBPS)) mod s
 2. **星座图**：所有实际发送的 BPSK 数据符号（`0 → +1`、`1 → -1`），标出同相/正交分量坐标轴与 bit 对应关系。
 3. **子载波映射图**：第一个 DATA OFDM 符号的 64 个子载波分配（48 数据 + 4 导频 + 12 空载波），按颜色区分数据、导频与空载波，并标出 DC 子载波。
 4. **上采样后频域图**：频域 2 倍补零上采样前后对比（64 点 → 128 点），展示正、负频率之间插入的 64 个零。
-5. **功率谱密度图**：完整串行发射波形的 Welch 功率谱密度，频率单位为 MHz，功率谱密度单位为 dB/Hz。
+5. **功率谱密度图**：完整串行发射波形的 pwelch 功率谱密度，频率单位为 MHz，功率谱密度单位为 dB/Hz。

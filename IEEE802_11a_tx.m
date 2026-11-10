@@ -188,13 +188,13 @@ fprintf('循环前缀：%d samples (%.1f us)\n', ...
 % 1) 时域波形图
 % -------------------------------
 % 展示前若干个含循环前缀的 DATA OFDM 符号，并标出循环前缀结束位置。
-plot_symbol_count = 1;    % 显示 OFDM 符号个数
-plot_sample_count = (oversampled_fft_size + cyclic_prefix_length) * plot_symbol_count;
+plot_symbol_count = 2;                                                                    % 显示 OFDM 符号个数
+plot_sample_count = (oversampled_fft_size + cyclic_prefix_length) * plot_symbol_count;    % 每个 OFDM 符号的样本数
 plot_waveform = transmit_waveform(1:plot_sample_count);
 plot_time_axis_us = (0:(plot_sample_count - 1)) / sample_rate_hz * 1e6;
 
-symbol_duration_us = (oversampled_fft_size + cyclic_prefix_length) / sample_rate_hz * 1e6;    % 每个含 CP 符号的时长
-cp_duration_us = cyclic_prefix_duration_s * 1e6;                                              % CP 时长
+symbol_duration_us = (oversampled_fft_size + cyclic_prefix_length) / sample_rate_hz * 1e6;    % 每个含 CP 符号的时长，4 us
+cp_duration_us = cyclic_prefix_duration_s * 1e6;                                              % CP 时长，0.8 us
 
 figure('Name', '时域波形图');
 
@@ -334,31 +334,12 @@ title('上采样后：128 点频域符号（中间 64 个 bin 补零）');
 hold off;
 
 % -------------------------------
-% 5) 功率谱密度图（Welch 方法）
+% 5) 功率谱密度图（pwelch）
 % -------------------------------
-psd_segment_length = 4096;
-psd_overlap = psd_segment_length / 2;
-psd_fft_length = 8192;
-psd_segment_step = psd_segment_length - psd_overlap;
-psd_segment_count = floor((numel(transmit_waveform) - psd_overlap) / ...
-    psd_segment_step);
-psd_window = 0.5 - 0.5 * cos(2 * pi * ...
-    (0:psd_segment_length - 1)' / psd_segment_length);
-psd_accumulator = zeros(psd_fft_length, 1);
-
-for psd_segment_index = 1:psd_segment_count
-    first_sample_index = (psd_segment_index - 1) * psd_segment_step + 1;
-    last_sample_index = first_sample_index + psd_segment_length - 1;
-    waveform_segment = transmit_waveform(first_sample_index:last_sample_index).';
-    segment_spectrum = fftshift(fft(waveform_segment .* psd_window, ...
-        psd_fft_length));
-    psd_accumulator = psd_accumulator + abs(segment_spectrum).^2 / ...
-        (sample_rate_hz * sum(psd_window.^2));
-end
-
-power_spectral_density = psd_accumulator / psd_segment_count;
-psd_frequency_hz = (-psd_fft_length / 2:psd_fft_length / 2 - 1) * ...
-    (sample_rate_hz / psd_fft_length);
+% 使用 Signal Processing Toolbox 的 pwelch 计算完整发射波形的功率谱密度。
+% 参数：汉宁窗 4096 点、50% 重叠（2048 点）、8192 点 FFT、输出以 DC 为中心。
+[power_spectral_density, psd_frequency_hz] = pwelch(transmit_waveform(:), ...
+    hann(4096, 'periodic'), 2048, 8192, sample_rate_hz, 'centered', 'psd');
 
 figure('Name', '功率谱密度图');
 plot(psd_frequency_hz / 1e6, ...
