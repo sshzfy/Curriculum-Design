@@ -9,64 +9,51 @@ coded_bits_per_symbol = 48;    % 每个 OFDM 符号的编码位数
 data_bits_per_symbol = 24;     % 每个 OFDM 符号的数据位数
 code_rate = 1/2;               % 编码效率
 bits_per_byte = 8;
+service_bit_count = 16;        % SERVICE 字段位数
+tail_bit_count = 6;            % TAIL 字段位数
 repeat_count = 8;              % 重复次数
 
 %% 原始数据生成
-payload_bytes = uint8(1:130);                                       % 原始数据
+payload_bytes = uint8(1:130);                                       % 原始数据 1~130
 repeated_payload_bytes = repmat(payload_bytes, 1, repeat_count);    % 重复发送
 
-% 按 IEEE 802.11 位序排列：每个字节最低有效位先发送。
-payload_bit_matrix = int2bit(repeated_payload_bytes, bits_per_byte, false);
-payload_data_bits = double(reshape(payload_bit_matrix.', 1, []));
+payload_bit_matrix = int2bit(repeated_payload_bytes, bits_per_byte, false);    % 按列输出每个字节的 8 个位（第一行为最低有效位）
+payload_data_bits = double(reshape(payload_bit_matrix, 1, []));                % 按列展开，保持字节顺序
 
-%% CRC-32 计算
-% 反射形式多项式 0xEDB88320
-% 初值和最终异或值均为 0xFFFFFFFF。
-crc_polynomial_reflected = uint32(hex2dec('EDB88320'));
-crc_register = uint32(hex2dec('FFFFFFFF'));
+% CRC-32 计算
+crc_polynomial_reflected = uint32(hex2dec('EDB88320'));    % 反射多项式
+crc_register = uint32(hex2dec('FFFFFFFF'));                % CRC 寄存器初始值
 
-for bit_index = 1:numel(payload_data_bits)
-    feedback_bit = xor(bitget(crc_register, 1) ~= 0, ...
-        payload_data_bits(bit_index) ~= 0);
-    crc_register = bitshift(crc_register, -1);
+for k = 1:numel(payload_data_bits)
+    feedback_bit = xor(bitget(crc_register, 1), payload_data_bits(k));    % 异或最低有效位和当前数据位
+    crc_register = bitshift(crc_register, -1);                            % 右移一位
     if feedback_bit
-        crc_register = bitxor(crc_register, crc_polynomial_reflected);
+        crc_register = bitxor(crc_register, crc_polynomial_reflected);    % 反馈位为 1 时，异位多项式
     end
 end
 
-crc_value = bitxor(crc_register, uint32(hex2dec('FFFFFFFF')));
+crc_value = bitxor(crc_register, uint32(hex2dec('FFFFFFFF')));    % 最终 CRC 值
 
-% FCS 按最低有效位先发送，生成与 payload_data_bits 同为行向量的 PSDU 位流。
-crc_bits_row = zeros(1, 32);
-for crc_bit_index = 1:32
-    crc_bits_row(crc_bit_index) = bitget(crc_value, crc_bit_index);
-end
-payload_bits = [payload_data_bits, crc_bits_row];
+crc_bits_row = double(bitget(crc_value, 1:32));       % CRC 值的位展开
+payload_bits = [payload_data_bits, crc_bits_row];     % 数据 + FCS
 
-%% SERVICE、TAIL 和 OFDM 符号补零
-service_bits = zeros(1, 16);
-tail_bits = zeros(1, 6);
-bits_before_padding = [service_bits, payload_bits, tail_bits];
+% 加上 SERVICE、TAIL 字段位
+service_bits = zeros(1, service_bit_count);
+tail_bits = zeros(1, tail_bit_count);
+bits_before_padding = [service_bits, payload_bits, tail_bits];     % SERVICE、数据 + FCS、TAIL
 
-ofdm_symbol_count = ceil(numel(bits_before_padding) / data_bits_per_symbol);    % OFDM 符号数
-padding_bit_count = ofdm_symbol_count * data_bits_per_symbol - ...
-    numel(bits_before_padding);                                                 % 补零位数
-padded_bits = [bits_before_padding, zeros(1, padding_bit_count)];               % 补零后的 bit 流
+%% OFDM 符号补零
+ofdm_symbol_count = ceil(numel(bits_before_padding) / data_bits_per_symbol);                  % OFDM 符号数（向上取整）
+padding_bit_count = ofdm_symbol_count * data_bits_per_symbol - numel(bits_before_padding);    % 补零位数
+padded_bits = [bits_before_padding, zeros(1, padding_bit_count)];                             % 补零后的 bit 流
 
 % 长度统计
-fprintf('原始数据：%d bytes (%d bits)\n', ...
-    numel(payload_bytes), numel(payload_bytes) * bits_per_byte);
-fprintf('重复后数据：%d bytes (%d bits)\n', ...
-    numel(repeated_payload_bytes), numel(payload_data_bits));
+fprintf('重复后数据：%d bytes (%d bits)\n', numel(repeated_payload_bytes), numel(payload_data_bits));
 fprintf('CRC-32 FCS：0x%08X（32 bits）\n', crc_value);
-fprintf('添加 FCS 后 PSDU：%d bits\n', numel(payload_bits));
-fprintf('添加 SERVICE 和 TAIL 后：%d bits\n', numel(bits_before_padding));
-fprintf('OFDM 符号数：%d\n', ofdm_symbol_count);
-fprintf('补零：%d bits\n', padding_bit_count);
 fprintf('最终 bit 流：%d bits\n', numel(padded_bits));
 
 %% 加扰
-scrambler_seed = [1 0 1 1 1 0 1];
+scrambler_seed = [1 0 1 1 1 0 1];    % x7~x1，索引为 1~7
 
 scrambling_sequence = zeros(size(padded_bits));    % 加扰序列
 scrambler_state = scrambler_seed;                  % 加扰状态
@@ -78,11 +65,8 @@ scrambler_state = scrambler_seed;                  % 加扰状态
 %     输出<——x7 <- x6 <- x5 <- x4 <- x3 <- x2 <- x1 <——————— 输入数据
 % x7 和 x4 位异或，作为反馈送入 x1，其他位左移一位。
 for bit_index = 1:numel(padded_bits)
-    
-    scrambling_sequence(bit_index) = xor( ...
-        scrambler_state(1), scrambler_state(4));    % 加扰序列
-    scrambler_state = [scrambler_state(2:end), ...
-        scrambling_sequence(bit_index)];            % 更新加扰状态
+    scrambling_sequence(bit_index) = xor(scrambler_state(1), scrambler_state(4));    % x7 异或 x4，作为反馈送入 x1
+    scrambler_state = [scrambler_state(2:end), scrambling_sequence(bit_index)];      % 更新加扰状态
 end
 
 scrambled_bits = double(xor(padded_bits, scrambling_sequence));    % 加扰后的 bit 流
@@ -92,7 +76,6 @@ tail_start_index = numel(service_bits) + numel(payload_bits) + 1;             % 
 tail_indices = tail_start_index:(tail_start_index + numel(tail_bits) - 1);    % TAIL 位索引
 scrambled_bits(tail_indices) = 0;                                             % 恢复 TAIL 位为 0
 
-fprintf('加扰初始状态：%s\n', sprintf('%d', scrambler_seed));
 fprintf('加扰后 bit 流：%d bits\n', numel(scrambled_bits));
 
 %% 卷积编码
@@ -144,24 +127,8 @@ fprintf('交织后 bit 流：%d bits\n', numel(interleaved_bits));
 %% BPSK 调制
 BPSK_data = 1 - 2 * interleaved_bits_matrix;    % BPSK 符号：0 -> +1，1 -> -1
 
-% BPSK 星座图
-bpsk_constellation_points = [-1, 1];
-figure('Name', 'BPSK 星座图');
-plot(bpsk_constellation_points, zeros(size(bpsk_constellation_points)), ...
-    'bo', 'MarkerFaceColor', 'b', 'MarkerSize', 8);
-hold on;
-xline(0, ':k');
-yline(0, ':k');
-text(-1, 0.12, 'bit 1', 'HorizontalAlignment', 'center');
-text(1, 0.12, 'bit 0', 'HorizontalAlignment', 'center');
-grid on;
-axis equal;
-xlim([-1.5 1.5]);
-ylim([-0.3 0.3]);
-xlabel('同相分量 I');
-ylabel('正交分量 Q');
-title('BPSK 星座图：0 映射到 +1，1 映射到 -1');
-hold off;
+% BPSK_data 为 48 x interleaved_symbol_count 的矩阵，每列是一个 OFDM 符号的
+% 48 个数据子载波调制符号；实际发送符号的星座图统一在脚本末尾的“绘图”部分绘制。
 
 %% 子载波映射
 fft_size = 64;
@@ -177,16 +144,6 @@ data_bin_indices = mod(data_subcarrier_indices, fft_size) + 1;
 pilot_bin_indices = mod(pilot_subcarrier_indices, fft_size) + 1;
 frequency_domain_symbols = complex(zeros(fft_size, interleaved_symbol_count));
 frequency_domain_symbols(data_bin_indices, :) = BPSK_data;
-
-% 抽取第 1 个符号的 64 点频域数据
-sym_freq = frequency_domain_symbols(:, 1);
-
-% 画图 (使用 fftshift 将 0 频移到中间，方便观察)
-figure;
-plot(-32:31, abs(fftshift(sym_freq)), 'bo-', 'LineWidth', 1.5);
-grid on;
-title('一个 OFDM 符号的频域幅度分布 (64点)');
-xlabel('物理子载波频点 (k)'); ylabel('幅度');
 
 %% 插入导频
 % IEEE 802.11a 导频极性序列由 x^7 + x^4 + 1 扰码器生成，初态为全 1。
@@ -216,31 +173,6 @@ fprintf('频域矩阵：%d bins × %d OFDM 符号\n', ...
     fft_size, size(frequency_domain_symbols, 2));
 fprintf('每符号子载波：%d 数据 + %d 导频 + %d 空载波\n', ...
     numel(data_bin_indices), numel(pilot_bin_indices), null_subcarrier_count);
-
-%% 子载波映射图
-% 显示第一个 DATA 符号的 64 个频域载波值，保留 BPSK 的正负号。
-mapped_subcarrier_indices = (-fft_size / 2:fft_size / 2 - 1).';
-first_mapped_symbol = fftshift(frequency_domain_symbols(:, 1));
-data_carrier_mask = ismember(mapped_subcarrier_indices, ...
-    data_subcarrier_indices);
-pilot_carrier_mask = ismember(mapped_subcarrier_indices, ...
-    pilot_subcarrier_indices);
-
-figure('Name', '首个 DATA 符号子载波映射');
-stem(mapped_subcarrier_indices, real(first_mapped_symbol), ...
-    'Color', [0.75 0.75 0.75]);
-hold on;
-stem(mapped_subcarrier_indices(data_carrier_mask), ...
-    real(first_mapped_symbol(data_carrier_mask)), 'b', 'filled');
-stem(mapped_subcarrier_indices(pilot_carrier_mask), ...
-    real(first_mapped_symbol(pilot_carrier_mask)), 'r', 'filled');
-grid on;
-xlim([-fft_size / 2, fft_size / 2 - 1]);
-xlabel('子载波编号 k');
-ylabel('实部 X[k]');
-title('首个 DATA OFDM 符号的 64 点子载波映射');
-legend('全部子载波', '数据子载波', '导频', 'Location', 'best');
-hold off;
 
 %% 上采样
 upsampling_factor = 2;
@@ -295,27 +227,102 @@ fprintf('加 CP 后：%d samples × %d symbols；串行波形：%d complex sampl
     size(ofdm_symbols_with_cp, 1), size(ofdm_symbols_with_cp, 2), ...
     numel(transmit_waveform));
 
-%% 时域波形图
-first_symbol_with_cp = ofdm_symbols_with_cp(:, 1);
-time_axis_us = (0:(numel(first_symbol_with_cp) - 1)) / ...
-    sample_rate_hz * 1e6;
-cp_boundary_time_us = cyclic_prefix_duration_s * 1e6;
+%% 绘图
 
-figure('Name', '首个 DATA 符号时域波形');
+% -------------------------------
+% 1) 时域波形图
+% -------------------------------
+% 展示前若干个含循环前缀的 DATA OFDM 符号，并标出循环前缀结束位置。
+plot_symbol_count = 4;    % 显示前 4 个 OFDM 符号
+plot_sample_count = (oversampled_fft_size + cyclic_prefix_length) * ...
+    plot_symbol_count;
+plot_waveform = transmit_waveform(1:plot_sample_count);
+plot_time_axis_us = (0:(plot_sample_count - 1)) / sample_rate_hz * 1e6;
+
+symbol_duration_us = (oversampled_fft_size + cyclic_prefix_length) / ...
+    sample_rate_hz * 1e6;                     % 每个含 CP 符号的时长
+cp_duration_us = cyclic_prefix_duration_s * 1e6;    % CP 时长
+cp_end_times_us = (0:(plot_symbol_count - 1)) * symbol_duration_us + ...
+    cp_duration_us;                           % 每个符号 CP 结束的时刻
+
+figure('Name', '时域波形图');
 subplot(2, 1, 1);
-plot(time_axis_us, real(first_symbol_with_cp));
+plot(plot_time_axis_us, real(plot_waveform), 'b');
 hold on;
-xline(cp_boundary_time_us, '--k', 'CP 边界');
+for cp_time = cp_end_times_us
+    xline(cp_time, '--k');
+end
 grid on;
-ylabel('实部');
-title('首个含循环前缀的 DATA OFDM 符号');
+ylabel('同相分量 I');
+title('DATA OFDM 时域波形（前 2 个符号，实部）');
 hold off;
 
 subplot(2, 1, 2);
-plot(time_axis_us, imag(first_symbol_with_cp));
+plot(plot_time_axis_us, imag(plot_waveform), 'r');
 hold on;
-xline(cp_boundary_time_us, '--k', 'CP 边界');
+for cp_time = cp_end_times_us
+    xline(cp_time, '--k');
+end
 grid on;
 xlabel('时间 (\mus)');
-ylabel('虚部');
+ylabel('正交分量 Q');
+title('DATA OFDM 时域波形（前 2 个符号，虚部）');
 hold off;
+
+% -------------------------------
+% 2) 星座图
+% -------------------------------
+% 展示实际发送的 BPSK 数据符号（0 -> +1，1 -> -1）。
+transmitted_bpsk_symbols = BPSK_data(:);
+
+figure('Name', '星座图');
+plot(transmitted_bpsk_symbols, zeros(size(transmitted_bpsk_symbols)), ...
+    'b.', 'MarkerSize', 6);
+hold on;
+xline(0, ':k');
+yline(0, ':k');
+text(-1, 0.15, 'bit 1', 'HorizontalAlignment', 'center');
+text(1, 0.15, 'bit 0', 'HorizontalAlignment', 'center');
+grid on;
+axis equal;
+xlim([-1.5 1.5]);
+ylim([-0.6 0.6]);
+xlabel('同相分量 I');
+ylabel('正交分量 Q');
+title(sprintf('BPSK 星座图（%d 个实际发送符号）', numel(transmitted_bpsk_symbols)));
+hold off;
+
+% -------------------------------
+% 3) 功率谱密度图（Welch 方法）
+% -------------------------------
+psd_segment_length = 4096;
+psd_overlap = psd_segment_length / 2;
+psd_fft_length = 8192;
+psd_segment_step = psd_segment_length - psd_overlap;
+psd_segment_count = floor((numel(transmit_waveform) - psd_overlap) / ...
+    psd_segment_step);
+psd_window = 0.5 - 0.5 * cos(2 * pi * ...
+    (0:psd_segment_length - 1)' / psd_segment_length);
+psd_accumulator = zeros(psd_fft_length, 1);
+
+for psd_segment_index = 1:psd_segment_count
+    first_sample_index = (psd_segment_index - 1) * psd_segment_step + 1;
+    last_sample_index = first_sample_index + psd_segment_length - 1;
+    waveform_segment = transmit_waveform(first_sample_index:last_sample_index).';
+    segment_spectrum = fftshift(fft(waveform_segment .* psd_window, ...
+        psd_fft_length));
+    psd_accumulator = psd_accumulator + abs(segment_spectrum).^2 / ...
+        (sample_rate_hz * sum(psd_window.^2));
+end
+
+power_spectral_density = psd_accumulator / psd_segment_count;
+psd_frequency_hz = (-psd_fft_length / 2:psd_fft_length / 2 - 1) * ...
+    (sample_rate_hz / psd_fft_length);
+
+figure('Name', '功率谱密度图');
+plot(psd_frequency_hz / 1e6, ...
+    10 * log10(max(power_spectral_density, realmin('double'))));
+grid on;
+xlabel('频率 (MHz)');
+ylabel('功率谱密度 (dB/Hz)');
+title('完整 DATA 发射波形的功率谱密度');
