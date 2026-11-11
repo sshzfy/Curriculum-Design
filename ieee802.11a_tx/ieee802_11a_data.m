@@ -1,6 +1,22 @@
-clear;
-clc;
-close all;
+function [data_field_waveform, sample_rate_hz, oversampled_fft_size, ...
+          cyclic_prefix_length, ofdm_symbols_with_cp] = IEEE802_11a_tx(plot_enable)
+%IEEE802_11a_tx  生成 IEEE 802.11a 6 Mbps DATA 字段的复基带波形（40 MHz，含循环前缀）。
+%
+%   [wave, fs, nfft_os, cp_len, syms] = IEEE802_11a_tx(plot_enable)
+%
+%   输入 plot_enable：true 时绘制过程图（默认 true）；false 时不绘图。
+%   输出：
+%     wave   - 串行 DATA 字段复基带波形（行向量，1×Nsample）
+%     fs     - 采样率（Hz，40 MHz）
+%     nfft_os- 上采样后的 IFFT 点数（128）
+%     cp_len - 循环前缀采样点数（32）
+%     syms   - 含循环前缀的 OFDM 符号矩阵（160×N_symbol）
+if nargin < 1 || isempty(plot_enable)
+    plot_enable = true;
+end
+if plot_enable
+    close all;
+end
 
 %% 参数设置
 data_rate_mbps = 6;            % 6 Mbps：BPSK，编码率 1/2
@@ -184,6 +200,8 @@ fprintf('循环前缀：%d samples (%.1f us)\n', ...
 
 %% 绘图
 
+if plot_enable
+
 % -------------------------------
 % 1) 时域波形图
 % -------------------------------
@@ -348,3 +366,8 @@ grid on;
 xlabel('频率 (MHz)');
 ylabel('功率谱密度 (dB/Hz)');
 title('完整 DATA 发射波形的功率谱密度');
+
+end
+
+data_field_waveform = transmit_waveform;
+end
