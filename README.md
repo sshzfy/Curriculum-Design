@@ -2,9 +2,9 @@
 
 ## 1. 当前实现范围
 
-`IEEE802_11a_tx.m` 当前完成 6 Mbps 模式下从测试 PSDU 到 DATA OFDM 时域波形：生成测试字节、追加 CRC-32 FCS、添加 SERVICE/TAIL 和 OFDM PAD、加扰、卷积编码、交织、BPSK 调制、数据子载波映射、导频插入、2 倍频域补零上采样、128 点 IFFT 和循环前缀添加。该文件已封装为函数 `IEEE802_11a_tx(plot_enable)`，返回 DATA 字段波形、采样率和循环前缀等参数，供外部组帧调用。
+`tx_data.m` 当前完成 6 Mbps 模式下从测试 PSDU 到 DATA OFDM 时域波形：生成测试字节、追加 CRC-32 FCS、添加 SERVICE/TAIL 和 OFDM PAD、加扰、卷积编码、交织、BPSK 调制、数据子载波映射、导频插入、2 倍频域补零上采样、128 点 IFFT 和循环前缀添加。该文件已封装为函数 `tx_data(plot_enable)`，返回 DATA 字段波形、采样率和循环前缀等参数，供外部组帧调用。
 
-`assemble_ppdu.m` 是组帧接口，按「前导 + SIGNAL + DATA」的顺序拼成完整的 IEEE 802.11a PPDU（40 MHz 复基带波形）。前导序列和 SIGNAL 字段由其他同学实现，接口分别在 `ieee80211a_preamble.m` 和 `ieee80211a_signal_field.m` 中定义（目前为待实现的占位函数）。
+`assemble_ppdu.m` 是组帧接口，按「前导 + SIGNAL + DATA」的顺序拼成完整的 IEEE 802.11a PPDU（40 MHz 复基带波形）。前导序列和 SIGNAL 字段由其他同学实现，接口分别在 `tx_preamble.m` 和 `tx_signal_field.m` 中定义。
 
 ## 2. 运行环境
 
@@ -15,7 +15,7 @@
 
   ```matlab
   % 只生成并绘制 DATA 字段过程图
-  IEEE802_11a_tx
+  tx_data
 
   % 组帧：前导（STS+LTF）+ SIGNAL + DATA，得到完整 PPDU
   [ppdu, fs, bounds] = assemble_ppdu

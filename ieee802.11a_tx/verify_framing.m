@@ -8,8 +8,8 @@ fs = 40e6;
 trellis = poly2trellis(7, [133 171]);
 
 %% 1. 模块长度与组帧边界
-pre = ieee80211a_preamble(fs);
-sig = ieee80211a_signal_field(fs, 130);
+pre = tx_preamble(fs);
+sig = tx_signal_field(fs, 130);
 assert(isequal(size(pre), [1 640]), '前导应为 1x640 行向量');
 assert(isequal(size(sig), [1 160]), 'SIGNAL 应为 1x160 行向量');
 fprintf('[1] PREAMBLE %d samples, SIGNAL %d samples\n', numel(pre), numel(sig));
@@ -24,8 +24,8 @@ fprintf('[2] 组帧: PREAMBLE %d + SIGNAL %d + DATA %d = %d samples (%.2f us)\n'
     640, 160, n_data, numel(ppdu), numel(ppdu)/fs*1e6);
 
 % 组装顺序正确：前 640 等于 pre，641:800 等于 sig
-assert(max(abs(ppdu(1:640) - pre)) < 1e-12, 'PPDU 前导段与 ieee80211a_preamble 不一致');
-assert(max(abs(ppdu(641:800) - sig)) < 1e-12, 'PPDU SIGNAL 段与 ieee80211a_signal_field 不一致');
+assert(max(abs(ppdu(1:640) - pre)) < 1e-12, 'PPDU 前导段与 tx_preamble 不一致');
+assert(max(abs(ppdu(641:800) - sig)) < 1e-12, 'PPDU SIGNAL 段与 tx_signal_field 不一致');
 
 %% 2. 前导结构：STF 周期 32、GI2 = 长符号后 64 点、T1==T2
 stf = pre(1:320);
@@ -75,5 +75,6 @@ assert(isequal(decoded, expected), 'SIGNAL 24 bit 译码结果与期望不符');
 fprintf('[5] SIGNAL Viterbi 译码 OK: %s\n', num2str(decoded));
 
 fprintf('\n=== 组帧自检全部通过 ===\n');
+
 
 

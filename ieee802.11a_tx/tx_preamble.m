@@ -1,7 +1,7 @@
-function preamble_waveform = ieee80211a_preamble(sample_rate_hz)
-%ieee80211a_preamble  前导序列接口（L-STF + L-LTF），40 MHz 复基带。
+function preamble_waveform = tx_preamble(sample_rate_hz)
+%tx_preamble  前导序列接口（L-STF + L-LTF），40 MHz 复基带。
 %
-%   preamble_waveform = ieee80211a_preamble(sample_rate_hz)
+%   preamble_waveform = tx_preamble(sample_rate_hz)
 %
 %   输入 sample_rate_hz：采样率（Hz，本设计为 40e6）。
 %   输出 preamble_waveform：前导序列复基带波形，1×N 行向量。
@@ -13,7 +13,7 @@ function preamble_waveform = ieee80211a_preamble(sample_rate_hz)
 %                     samples），共 320 samples；
 %     前导总长 = STS + LTF = 640 samples（16 us）。
 %
-%   频率映射、补零方式与 DATA 字段（IEEE802_11a_tx）完全一致，均为
+%   频率映射、补零方式与 DATA 字段（tx_data）完全一致，均为
 %   mod(k,64)+1 的自然顺序，保证 PPDU 拼接后各字段频谱对齐。
 
 % ---------------- 采样率契约 ----------------
@@ -30,7 +30,7 @@ Nlt  = 64;                                           % 长训练符号 64 点（
 % ---------------- STF 频域（64 点，自然频率顺序）----------------
 stf_k = [-24 -20 -16 -12 -8 -4 4 8 12 16 20 24];
 stf_v = [1+1j, -1-1j, 1+1j, -1-1j, -1-1j, 1+1j, ...
-         1+1j, -1-1j, 1+1j, -1-1j, -1-1j, 1+1j] * sqrt(13/6);   % 与 LTF 等功率
+         -1-1j, -1-1j, 1+1j, 1+1j, 1+1j, 1+1j] * sqrt(13/6);   % 修正：正半轴 [-1,-1,1,1,1,1]，与 LTF 等功率
 stf_f = zeros(1, Nfft);
 stf_f(mod(stf_k, Nfft) + 1) = stf_v;
 
@@ -42,6 +42,9 @@ ltf_v = [ 1,  1, -1, -1,  1,  1, -1,  1, -1,  1,  1,  1,  1,  1,  1, -1, ...
           1,  1, -1, -1,  1, -1,  1, -1,  1,  1,  1,  1];
 ltf_f = zeros(1, Nfft);
 ltf_f(mod(ltf_k, Nfft) + 1) = ltf_v;                   % DC 自动为 0
+
+assert(abs(sum(abs(stf_f).^2) - sum(abs(ltf_f).^2)) < 1e-9, ...
+       'STF 与 LTF 的频域总功率必须相等（sqrt(13/6) 保证这一点）');
 
 % ---------------- 频域补零上采样（与 DATA 字段一致）----------------
 pad = zeros(1, Nup - Nfft);                           % 中间补 64 个零
@@ -66,3 +69,5 @@ assert(numel(preamble_waveform) == expected_len, ...
 assert(isequal(ltf(1:os*2*Nsh), ltf_t(os*Nlt/2+1:end)), ...
     'GI2 应为长符号的后 64 点');
 end
+
+

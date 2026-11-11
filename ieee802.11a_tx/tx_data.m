@@ -1,8 +1,8 @@
-function [data_field_waveform, sample_rate_hz, oversampled_fft_size, ...
-          cyclic_prefix_length, ofdm_symbols_with_cp] = IEEE802_11a_tx(plot_enable)
-%IEEE802_11a_tx  生成 IEEE 802.11a 6 Mbps DATA 字段的复基带波形（40 MHz，含循环前缀）。
+function [data_field_waveform, sample_rate_hz, oversampled_fft_size, cyclic_prefix_length, ofdm_symbols_with_cp] = ...
+    tx_data(plot_enable)
+%tx_data  生成 IEEE 802.11a 6 Mbps DATA 字段的复基带波形（40 MHz，含循环前缀）。
 %
-%   [wave, fs, nfft_os, cp_len, syms] = IEEE802_11a_tx(plot_enable)
+%   [wave, fs, nfft_os, cp_len, syms] = tx_data(plot_enable)
 %
 %   输入 plot_enable：true 时绘制过程图（默认 true）；false 时不绘图。
 %   输出：
@@ -97,13 +97,6 @@ coded_bits = reshape(convenc(scrambled_bits, trellis), 1, []);    % 卷积编码
 fprintf('卷积编码后 bit 流：%d bits\n', numel(coded_bits));
 
 %% 交织
-if mod(coded_bits_per_symbol, 16) ~= 0
-    error('coded_bits_per_symbol 必须是 16 的整数倍。');
-end
-
-if mod(numel(coded_bits), coded_bits_per_symbol) ~= 0
-    error('卷积编码后的位数必须是 coded_bits_per_symbol 的整数倍。');
-end
 
 interleaved_symbol_count = numel(coded_bits) / coded_bits_per_symbol;                        % 交织 OFDM 符号数（349）
 coded_bits_matrix = reshape(coded_bits, coded_bits_per_symbol, interleaved_symbol_count);    % 48 * 349 的矩阵，每列对应一个 OFDM 符号的编码位
@@ -137,22 +130,36 @@ fft_size = 64;                                                           % 64 �
 data_subcarrier_indices = [-26:-22, -20:-8, -6:-1, 1:6, 8:20, 22:26];    % +-21 +-7 留给导频，0 用于 DC
 pilot_subcarrier_indices = [-21, -7, 7, 21];                             % 用于导频的子载波索引
 
-if numel(data_subcarrier_indices) ~= size(BPSK_data, 1)
-    error('数据子载波数量必须与每个 OFDM 符号的数据调制符号数一致。');
-end
-
 % 转换到 1~64 范围
 data_bin_indices = mod(data_subcarrier_indices, fft_size) + 1;                     % 数据子载波索引
 pilot_bin_indices = mod(pilot_subcarrier_indices, fft_size) + 1;                   % 导频子载波索引
 frequency_domain_symbols = complex(zeros(fft_size, interleaved_symbol_count));     % 频域符号矩阵
 frequency_domain_symbols(data_bin_indices, :) = BPSK_data;                         % 数据子载波符号
 
-%% 插入导频（4 个导频子载波 [-21, -7, 7, 21] 的取值为 [1, 1, 1, -1]）
+%% 插入导频
+% IEEE 802.11a 导频极性序列由 x^7 + x^4 + 1 扰码器生成，初态为全 1。
+pilot_sequence_bits = zeros(1, 127);
+pilot_scrambler_state = ones(1, 7);
+for pilot_index = 1:numel(pilot_sequence_bits)
+    pilot_sequence_bits(pilot_index) = xor( ...
+        pilot_scrambler_state(1), pilot_scrambler_state(4));
+    pilot_scrambler_state = [pilot_scrambler_state(2:end), ...
+        pilot_sequence_bits(pilot_index)];
+end
+
+% 标准将扰码输出 0 映射为 +1、1 映射为 -1，得到 p_0 ... p_126。
+pilot_polarity_sequence = 1 - 2 * pilot_sequence_bits;
+
+% p_0 用于 SIGNAL；本脚本只生成 DATA，因此首个 OFDM 符号使用 p_1。
+pilot_polarity_indices = mod(1:interleaved_symbol_count, ...
+    numel(pilot_polarity_sequence)) + 1;
 pilot_symbol_base = [1; 1; 1; -1];
-pilot_subcarrier_symbols = repmat(pilot_symbol_base, 1, interleaved_symbol_count);
+pilot_subcarrier_symbols = pilot_symbol_base * ...
+    pilot_polarity_sequence(pilot_polarity_indices);
 frequency_domain_symbols(pilot_bin_indices, :) = pilot_subcarrier_symbols;
 
-null_subcarrier_count = fft_size - numel(data_bin_indices) - numel(pilot_bin_indices);
+null_subcarrier_count = fft_size - numel(data_bin_indices) - ...
+    numel(pilot_bin_indices);
 fprintf('频域矩阵：%d bins × %d OFDM 符号\n', ...
     fft_size, size(frequency_domain_symbols, 2));
 fprintf('每符号子载波：%d 数据 + %d 导频 + %d 空载波\n', ...
@@ -163,10 +170,6 @@ upsampling_factor = 2;
 base_sample_rate_hz = 20e6;                                  % 基础采样率 20 MHz
 sample_rate_hz = base_sample_rate_hz * upsampling_factor;    % 上采样后的采样率 40 MHz
 oversampled_fft_size = fft_size * upsampling_factor;         % 上采样后的 IFFT 点数 128
-
-if mod(fft_size, 2) ~= 0
-    error('频域补零上采样要求 fft_size 为偶数。');
-end
 
 % 在正、负频率部分之间补零，保持原有子载波编号及间隔。
 % 原 64 点频谱的后半部分（负频率）移到 128 点频谱末尾。
@@ -201,173 +204,174 @@ fprintf('循环前缀：%d samples (%.1f us)\n', ...
 %% 绘图
 
 if plot_enable
-
-% -------------------------------
-% 1) 时域波形图
-% -------------------------------
-% 展示前若干个含循环前缀的 DATA OFDM 符号，并标出循环前缀结束位置。
-plot_symbol_count = 2;                                                                    % 显示 OFDM 符号个数
-plot_sample_count = (oversampled_fft_size + cyclic_prefix_length) * plot_symbol_count;    % 每个 OFDM 符号的样本数
-plot_waveform = transmit_waveform(1:plot_sample_count);
-plot_time_axis_us = (0:(plot_sample_count - 1)) / sample_rate_hz * 1e6;
-
-symbol_duration_us = (oversampled_fft_size + cyclic_prefix_length) / sample_rate_hz * 1e6;    % 每个含 CP 符号的时长，4 us
-cp_duration_us = cyclic_prefix_duration_s * 1e6;                                              % CP 时长，0.8 us
-
-figure('Name', '时域波形图');
-
-% 实部
-subplot(2, 1, 1);
-plot(plot_time_axis_us, real(plot_waveform), 'b');
-hold on;
-i_ylim = [min(real(plot_waveform)), max(real(plot_waveform))];
-i_pad = 0.15 * (i_ylim(2) - i_ylim(1));
-i_ylim = [i_ylim(1) - i_pad, i_ylim(2) + i_pad];
-for sym = 1:plot_symbol_count
-    cp_start_us = (sym - 1) * symbol_duration_us;
-    cp_end_us = cp_start_us + cp_duration_us;
-    patch([cp_start_us, cp_end_us, cp_end_us, cp_start_us], ...
-        [i_ylim(1), i_ylim(1), i_ylim(2), i_ylim(2)], ...
-        [1, 0.85, 0.85], 'FaceAlpha', 0.4, 'EdgeColor', 'none');
-    xline(cp_end_us, '--k');
-end
-plot(plot_time_axis_us, real(plot_waveform), 'b', 'LineWidth', 1.2);
-text(cp_duration_us / 2, i_ylim(2), 'CP', ...
-    'HorizontalAlignment', 'center', 'VerticalAlignment', 'top', ...
-    'Color', [0.7, 0, 0], 'FontWeight', 'bold');
-text((symbol_duration_us + cp_duration_us) / 2, i_ylim(2), '有效符号', ...
-    'HorizontalAlignment', 'center', 'VerticalAlignment', 'top', ...
-    'Color', [0, 0, 0.7], 'FontWeight', 'bold');
-ylim(i_ylim);
-grid on;
-ylabel('同相分量 I');
-title(sprintf('DATA OFDM 时域波形（前 %d 个符号，实部）', plot_symbol_count));
-hold off;
-
-% 虚部
-subplot(2, 1, 2);
-plot(plot_time_axis_us, imag(plot_waveform), 'r');
-hold on;
-q_ylim = [min(imag(plot_waveform)), max(imag(plot_waveform))];
-q_pad = 0.15 * (q_ylim(2) - q_ylim(1));
-q_ylim = [q_ylim(1) - q_pad, q_ylim(2) + q_pad];
-for sym = 1:plot_symbol_count
-    cp_start_us = (sym - 1) * symbol_duration_us;
-    cp_end_us = cp_start_us + cp_duration_us;
-    patch([cp_start_us, cp_end_us, cp_end_us, cp_start_us], ...
-        [q_ylim(1), q_ylim(1), q_ylim(2), q_ylim(2)], ...
-        [1, 0.85, 0.85], 'FaceAlpha', 0.4, 'EdgeColor', 'none');
-    xline(cp_end_us, '--k');
-end
-plot(plot_time_axis_us, imag(plot_waveform), 'r', 'LineWidth', 1.2);
-text(cp_duration_us / 2, q_ylim(2), 'CP', ...
-    'HorizontalAlignment', 'center', 'VerticalAlignment', 'top', ...
-    'Color', [0.7, 0, 0], 'FontWeight', 'bold');
-text((symbol_duration_us + cp_duration_us) / 2, q_ylim(2), '有效符号', ...
-    'HorizontalAlignment', 'center', 'VerticalAlignment', 'top', ...
-    'Color', [0, 0, 0.7], 'FontWeight', 'bold');
-ylim(q_ylim);
-grid on;
-xlabel('时间 (\mus)');
-ylabel('正交分量 Q');
-title(sprintf('DATA OFDM 时域波形（前 %d 个符号，虚部）', plot_symbol_count));
-hold off;
-
-% -------------------------------
-% 2) 星座图
-% -------------------------------
-% 展示实际发送的 BPSK 数据符号（0 -> +1，1 -> -1）。
-transmitted_bpsk_symbols = BPSK_data(:);
-
-figure('Name', '星座图');
-plot(transmitted_bpsk_symbols, zeros(size(transmitted_bpsk_symbols)), ...
-    'b.', 'MarkerSize', 6);
-hold on;
-xline(0, ':k');
-yline(0, ':k');
-text(-1, 0.15, 'bit 1', 'HorizontalAlignment', 'center');
-text(1, 0.15, 'bit 0', 'HorizontalAlignment', 'center');
-grid on;
-axis equal;
-xlim([-1.5 1.5]);
-ylim([-0.6 0.6]);
-xlabel('同相分量 I');
-ylabel('正交分量 Q');
-title(sprintf('BPSK 星座图（%d 个实际发送符号）', numel(transmitted_bpsk_symbols)));
-hold off;
-
-% -------------------------------
-% 3) 子载波映射图
-% -------------------------------
-% 展示第一个 DATA OFDM 符号在 64 个子载波上的分配：
-% 48 个数据子载波（蓝）、4 个导频（红）、12 个空载波（灰叉，含 DC）。
-subcarrier_axis = -fft_size / 2:(fft_size / 2 - 1);    % -32 ~ 31
-null_subcarrier_indices = setdiff(subcarrier_axis, ...
-    [data_subcarrier_indices, pilot_subcarrier_indices]);
-
-figure('Name', '子载波映射图');
-hold on;
-stem(data_subcarrier_indices, real(BPSK_data(:, 1)), 'b', 'filled');
-stem(pilot_subcarrier_indices, real(pilot_subcarrier_symbols(:, 1)), 'r', 'filled');
-plot(null_subcarrier_indices, zeros(size(null_subcarrier_indices)), ...
-    'x', 'Color', [0.55 0.55 0.55], 'MarkerSize', 6);
-xline(0, ':k');    % DC 子载波
-grid on;
-xlim([-32 31]);
-ylim([-1.5 1.5]);
-xlabel('子载波编号');
-ylabel('符号值');
-title(sprintf('子载波映射（第 1 个 DATA OFDM 符号）：%d 数据 + %d 导频 + %d 空载波', ...
-    numel(data_subcarrier_indices), numel(pilot_subcarrier_indices), ...
-    numel(null_subcarrier_indices)));
-legend({'数据子载波', '导频子载波', '空载波'}, 'Location', 'southoutside', ...
-    'Orientation', 'horizontal');
-hold off;
-
-% -------------------------------
-% 4) 上采样后频域图
-% -------------------------------
-% 频域 2 倍补零上采样：原 64 点频谱在正、负频率之间插入 64 个零，
-% 得到 128 点频谱（前 32 个 bin 与后 32 个 bin 为原符号，中间 64 个 bin 补零）。
-upsampled_first_symbol = upsampled_frequency_domain_symbols(:, 1);
-
-figure('Name', '上采样后频域图');
-subplot(2, 1, 1);
-stem(1:fft_size, real(frequency_domain_symbols(:, 1)), 'b', 'filled');
-grid on;
-xlim([0 fft_size + 1]);
-ylabel('符号值');
-title('上采样前：64 点频域符号（第 1 个 DATA 符号）');
-
-subplot(2, 1, 2);
-stem(1:oversampled_fft_size, real(upsampled_first_symbol), 'r', 'filled');
-hold on;
-xline(half_fft_size + 0.5, ':k');
-xline(oversampled_fft_size - half_fft_size + 0.5, ':k');
-grid on;
-xlim([0 oversampled_fft_size + 1]);
-xlabel('频域 bin 编号');
-ylabel('符号值');
-title('上采样后：128 点频域符号（中间 64 个 bin 补零）');
-hold off;
-
-% -------------------------------
-% 5) 功率谱密度图（pwelch）
-% -------------------------------
-% 使用 Signal Processing Toolbox 的 pwelch 计算完整发射波形的功率谱密度。
-% 参数：汉宁窗 4096 点、50% 重叠（2048 点）、8192 点 FFT、输出以 DC 为中心。
-[power_spectral_density, psd_frequency_hz] = pwelch(transmit_waveform(:), ...
-    hann(4096, 'periodic'), 2048, 8192, sample_rate_hz, 'centered', 'psd');
-
-figure('Name', '功率谱密度图');
-plot(psd_frequency_hz / 1e6, ...
-    10 * log10(max(power_spectral_density, realmin('double'))));
-grid on;
-xlabel('频率 (MHz)');
-ylabel('功率谱密度 (dB/Hz)');
-title('完整 DATA 发射波形的功率谱密度');
-
+    
+    % -------------------------------
+    % 1) 时域波形图
+    % -------------------------------
+    % 展示前若干个含循环前缀的 DATA OFDM 符号，并标出循环前缀结束位置。
+    plot_symbol_count = 2;                                                                    % 显示 OFDM 符号个数
+    plot_sample_count = (oversampled_fft_size + cyclic_prefix_length) * plot_symbol_count;    % 每个 OFDM 符号的样本数
+    plot_waveform = transmit_waveform(1:plot_sample_count);
+    plot_time_axis_us = (0:(plot_sample_count - 1)) / sample_rate_hz * 1e6;
+    
+    symbol_duration_us = (oversampled_fft_size + cyclic_prefix_length) / sample_rate_hz * 1e6;    % 每个含 CP 符号的时长，4 us
+    cp_duration_us = cyclic_prefix_duration_s * 1e6;                                              % CP 时长，0.8 us
+    
+    figure('Name', '时域波形图');
+    
+    % 实部
+    subplot(2, 1, 1);
+    plot(plot_time_axis_us, real(plot_waveform), 'b');
+    hold on;
+    i_ylim = [min(real(plot_waveform)), max(real(plot_waveform))];
+    i_pad = 0.15 * (i_ylim(2) - i_ylim(1));
+    i_ylim = [i_ylim(1) - i_pad, i_ylim(2) + i_pad];
+    for sym = 1:plot_symbol_count
+        cp_start_us = (sym - 1) * symbol_duration_us;
+        cp_end_us = cp_start_us + cp_duration_us;
+        patch([cp_start_us, cp_end_us, cp_end_us, cp_start_us], ...
+            [i_ylim(1), i_ylim(1), i_ylim(2), i_ylim(2)], ...
+            [1, 0.85, 0.85], 'FaceAlpha', 0.4, 'EdgeColor', 'none');
+        xline(cp_end_us, '--k');
+    end
+    plot(plot_time_axis_us, real(plot_waveform), 'b', 'LineWidth', 1.2);
+    text(cp_duration_us / 2, i_ylim(2), 'CP', ...
+        'HorizontalAlignment', 'center', 'VerticalAlignment', 'top', ...
+        'Color', [0.7, 0, 0], 'FontWeight', 'bold');
+    text((symbol_duration_us + cp_duration_us) / 2, i_ylim(2), '有效符号', ...
+        'HorizontalAlignment', 'center', 'VerticalAlignment', 'top', ...
+        'Color', [0, 0, 0.7], 'FontWeight', 'bold');
+    ylim(i_ylim);
+    grid on;
+    ylabel('同相分量 I');
+    title(sprintf('DATA OFDM 时域波形（前 %d 个符号，实部）', plot_symbol_count));
+    hold off;
+    
+    % 虚部
+    subplot(2, 1, 2);
+    plot(plot_time_axis_us, imag(plot_waveform), 'r');
+    hold on;
+    q_ylim = [min(imag(plot_waveform)), max(imag(plot_waveform))];
+    q_pad = 0.15 * (q_ylim(2) - q_ylim(1));
+    q_ylim = [q_ylim(1) - q_pad, q_ylim(2) + q_pad];
+    for sym = 1:plot_symbol_count
+        cp_start_us = (sym - 1) * symbol_duration_us;
+        cp_end_us = cp_start_us + cp_duration_us;
+        patch([cp_start_us, cp_end_us, cp_end_us, cp_start_us], ...
+            [q_ylim(1), q_ylim(1), q_ylim(2), q_ylim(2)], ...
+            [1, 0.85, 0.85], 'FaceAlpha', 0.4, 'EdgeColor', 'none');
+        xline(cp_end_us, '--k');
+    end
+    plot(plot_time_axis_us, imag(plot_waveform), 'r', 'LineWidth', 1.2);
+    text(cp_duration_us / 2, q_ylim(2), 'CP', ...
+        'HorizontalAlignment', 'center', 'VerticalAlignment', 'top', ...
+        'Color', [0.7, 0, 0], 'FontWeight', 'bold');
+    text((symbol_duration_us + cp_duration_us) / 2, q_ylim(2), '有效符号', ...
+        'HorizontalAlignment', 'center', 'VerticalAlignment', 'top', ...
+        'Color', [0, 0, 0.7], 'FontWeight', 'bold');
+    ylim(q_ylim);
+    grid on;
+    xlabel('时间 (\mus)');
+    ylabel('正交分量 Q');
+    title(sprintf('DATA OFDM 时域波形（前 %d 个符号，虚部）', plot_symbol_count));
+    hold off;
+    
+    % -------------------------------
+    % 2) 星座图
+    % -------------------------------
+    % 展示实际发送的 BPSK 数据符号（0 -> +1，1 -> -1）。
+    transmitted_bpsk_symbols = BPSK_data(:);
+    
+    figure('Name', '星座图');
+    plot(transmitted_bpsk_symbols, zeros(size(transmitted_bpsk_symbols)), ...
+        'b.', 'MarkerSize', 6);
+    hold on;
+    xline(0, ':k');
+    yline(0, ':k');
+    text(-1, 0.15, 'bit 1', 'HorizontalAlignment', 'center');
+    text(1, 0.15, 'bit 0', 'HorizontalAlignment', 'center');
+    grid on;
+    axis equal;
+    xlim([-1.5 1.5]);
+    ylim([-0.6 0.6]);
+    xlabel('同相分量 I');
+    ylabel('正交分量 Q');
+    title(sprintf('BPSK 星座图（%d 个实际发送符号）', numel(transmitted_bpsk_symbols)));
+    hold off;
+    
+    % -------------------------------
+    % 3) 子载波映射图
+    % -------------------------------
+    % 展示第一个 DATA OFDM 符号在 64 个子载波上的分配：
+    % 48 个数据子载波（蓝）、4 个导频（红）、12 个空载波（灰叉，含 DC）。
+    subcarrier_axis = -fft_size / 2:(fft_size / 2 - 1);    % -32 ~ 31
+    null_subcarrier_indices = setdiff(subcarrier_axis, ...
+        [data_subcarrier_indices, pilot_subcarrier_indices]);
+    
+    figure('Name', '子载波映射图');
+    hold on;
+    stem(data_subcarrier_indices, real(BPSK_data(:, 1)), 'b', 'filled');
+    stem(pilot_subcarrier_indices, real(pilot_subcarrier_symbols(:, 1)), 'r', 'filled');
+    plot(null_subcarrier_indices, zeros(size(null_subcarrier_indices)), ...
+        'x', 'Color', [0.55 0.55 0.55], 'MarkerSize', 6);
+    xline(0, ':k');    % DC 子载波
+    grid on;
+    xlim([-32 31]);
+    ylim([-1.5 1.5]);
+    xlabel('子载波编号');
+    ylabel('符号值');
+    title(sprintf('子载波映射（第 1 个 DATA OFDM 符号）：%d 数据 + %d 导频 + %d 空载波', ...
+        numel(data_subcarrier_indices), numel(pilot_subcarrier_indices), ...
+        numel(null_subcarrier_indices)));
+    legend({'数据子载波', '导频子载波', '空载波'}, 'Location', 'southoutside', ...
+        'Orientation', 'horizontal');
+    hold off;
+    
+    % -------------------------------
+    % 4) 上采样后频域图
+    % -------------------------------
+    % 频域 2 倍补零上采样：原 64 点频谱在正、负频率之间插入 64 个零，
+    % 得到 128 点频谱（前 32 个 bin 与后 32 个 bin 为原符号，中间 64 个 bin 补零）。
+    upsampled_first_symbol = upsampled_frequency_domain_symbols(:, 1);
+    
+    figure('Name', '上采样后频域图');
+    subplot(2, 1, 1);
+    stem(1:fft_size, real(frequency_domain_symbols(:, 1)), 'b', 'filled');
+    grid on;
+    xlim([0 fft_size + 1]);
+    ylabel('符号值');
+    title('上采样前：64 点频域符号（第 1 个 DATA 符号）');
+    
+    subplot(2, 1, 2);
+    stem(1:oversampled_fft_size, real(upsampled_first_symbol), 'r', 'filled');
+    hold on;
+    xline(half_fft_size + 0.5, ':k');
+    xline(oversampled_fft_size - half_fft_size + 0.5, ':k');
+    grid on;
+    xlim([0 oversampled_fft_size + 1]);
+    xlabel('频域 bin 编号');
+    ylabel('符号值');
+    title('上采样后：128 点频域符号（中间 64 个 bin 补零）');
+    hold off;
+    
+    % -------------------------------
+    % 5) 功率谱密度图（pwelch）
+    % -------------------------------
+    % 使用 Signal Processing Toolbox 的 pwelch 计算完整发射波形的功率谱密度。
+    % 参数：汉宁窗 4096 点、50% 重叠（2048 点）、8192 点 FFT、输出以 DC 为中心。
+    [power_spectral_density, psd_frequency_hz] = pwelch(transmit_waveform(:), ...
+        hann(4096, 'periodic'), 2048, 8192, sample_rate_hz, 'centered', 'psd');
+    
+    figure('Name', '功率谱密度图');
+    plot(psd_frequency_hz / 1e6, ...
+        10 * log10(max(power_spectral_density, realmin('double'))));
+    grid on;
+    xlabel('频率 (MHz)');
+    ylabel('功率谱密度 (dB/Hz)');
+    title('完整 DATA 发射波形的功率谱密度');
+    
 end
 
 data_field_waveform = transmit_waveform;
 end
+

@@ -1,7 +1,7 @@
-function signal_waveform = ieee80211a_signal_field(sample_rate_hz, length_bytes)
-%ieee80211a_signal_field  SIGNAL 字段接口，40 MHz 复基带。
+function signal_waveform = tx_signal_field(sample_rate_hz, length_bytes)
+%tx_signal_field  SIGNAL 字段接口，40 MHz 复基带。
 %
-%   signal_waveform = ieee80211a_signal_field(sample_rate_hz, length_bytes)
+%   signal_waveform = tx_signal_field(sample_rate_hz, length_bytes)
 %
 %   输入：
 %     sample_rate_hz - 采样率（Hz，本设计为 40e6）
@@ -13,7 +13,7 @@ function signal_waveform = ieee80211a_signal_field(sample_rate_hz, length_bytes)
 %              + Parity(1) + Tail(6)；
 %     BPSK + 码率 1/2 卷积编码 + 交织 + 48 数据子载波 + 4 导频 [1 1 1 -1]；
 %     不做加扰。
-%   为使 SIGNAL 字段与 DATA 字段（IEEE802_11a_tx）频谱对齐，本函数：
+%   为使 SIGNAL 字段与 DATA 字段（tx_data）频谱对齐，本函数：
 %     1) 使用自然频率顺序 mod(k,64)+1 映射子载波（而非 signal.m 的 k+33）；
 %     2) 采用标准两级交织 output[i(k)] = input[k]；
 %     3) 频域中间补零到 128 点 + 128 点 IFFT（×2）上采样到 40 MHz，CP 32 点。
@@ -81,4 +81,3 @@ assert(numel(coded_bits) == 48, '卷积编码后应为 48 bit');
 assert(numel(signal_waveform) == expected_len, ...
     sprintf('SIGNAL 长度应为 %d 点，实际 %d 点', expected_len, numel(signal_waveform)));
 end
-

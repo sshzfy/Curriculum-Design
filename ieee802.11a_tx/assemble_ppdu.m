@@ -4,8 +4,8 @@ function [ppdu_waveform, sample_rate_hz, field_boundaries] = assemble_ppdu(plot_
 %   [ppdu, fs, bounds] = assemble_ppdu(plot_enable)
 %
 %   前导序列和 SIGNAL 字段由其他同学分别实现，接口为：
-%     preamble_waveform = ieee80211a_preamble(sample_rate_hz)
-%     signal_waveform   = ieee80211a_signal_field(sample_rate_hz, length_bytes)
+%     preamble_waveform = tx_preamble(sample_rate_hz)
+%     signal_waveform   = tx_signal_field(sample_rate_hz, length_bytes)
 %
 %   本文件只负责调用接口、归一化成行向量、拼帧和绘图。
 %
@@ -18,17 +18,17 @@ if nargin < 1 || isempty(plot_enable)
     plot_enable = true;
 end
 
-%% 1) DATA 字段（本仓库已实现）
-[data_field_waveform, sample_rate_hz] = ieee802_11a_data(false);
+%% 1) DATA 字段
+[data_field_waveform, sample_rate_hz] = tx_data(false);
 data_field_waveform = data_field_waveform(:).';
 
-%% 2) 前导序列（接口，由其他同学实现）
-preamble_waveform = ieee80211a_preamble(sample_rate_hz);
+%% 2) 前导序列
+preamble_waveform = tx_preamble(sample_rate_hz);
 preamble_waveform = preamble_waveform(:).';
 
-%% 3) SIGNAL 字段（接口，由其他同学实现）
+%% 3) SIGNAL 字段（接口，由其他同学实现
 % length_bytes：SIGNAL LENGTH 字段中的 PSDU 字节数，当前为 130。
-signal_waveform = ieee80211a_signal_field(sample_rate_hz, 130);
+signal_waveform = tx_signal_field(sample_rate_hz, 130);
 signal_waveform = signal_waveform(:).';
 
 %% 4) 组帧：前导 + SIGNAL + DATA
@@ -78,3 +78,4 @@ if plot_enable
     title('完整 IEEE 802.11a PPDU 功率谱密度');
 end
 end
+
