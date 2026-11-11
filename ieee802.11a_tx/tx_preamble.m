@@ -1,5 +1,5 @@
 function varargout = tx_preamble(sample_rate_hz, plot_enable)
-%tx_preamble  前导序列（L-STF + L-LTF），40 MHz 复基带。
+%tx_preamble  前导序列（L-STF + L-LTF）
 %
 %   用法一（接口，供组帧调用）：
 %     preamble = tx_preamble(40e6)         生成并绘图，返回波形
@@ -20,7 +20,7 @@ function varargout = tx_preamble(sample_rate_hz, plot_enable)
 %                     samples），共 320 samples；
 %     前导总长 = STS + LTF = 640 samples（16 us）。
 
-% ---------------- 默认参数（保证可独立运行）----------------
+% ---------------- 默认参数 ----------------
 if nargin < 1 || isempty(sample_rate_hz), sample_rate_hz = 40e6; end
 if nargin < 2 || isempty(plot_enable),    plot_enable    = true;  end
 
@@ -38,23 +38,23 @@ Nlt  = 64;                                           % 长训练符号 64 点（
 % ---------------- STF 频域（64 点，自然频率顺序）----------------
 stf_k = [-24 -20 -16 -12 -8 -4 4 8 12 16 20 24];
 stf_v = [1+1j, -1-1j, 1+1j, -1-1j, -1-1j, 1+1j, ...
-         -1-1j, -1-1j, 1+1j, 1+1j, 1+1j, 1+1j] * sqrt(13/6);   % 修正：正半轴 [-1,-1,1,1,1,1]
+    -1-1j, -1-1j, 1+1j, 1+1j, 1+1j, 1+1j] * sqrt(13/6);   % 修正：正半轴 [-1,-1,1,1,1,1]
 stf_f = zeros(1, Nfft);
 stf_f(mod(stf_k, Nfft) + 1) = stf_v;
 
 % ---------------- LTF 频域（64 点，自然频率顺序）----------------
 ltf_k = -26:26;                                        % 含直流
 ltf_v = [ 1,  1, -1, -1,  1,  1, -1,  1, -1,  1,  1,  1,  1,  1,  1, -1, ...
-         -1,  1,  1, -1,  1, -1,  1,  1,  1,  1,  0, ...
-          1, -1, -1,  1,  1, -1,  1, -1,  1, -1, -1, -1, -1, -1, ...
-          1,  1, -1, -1,  1, -1,  1, -1,  1,  1,  1,  1];
+    -1,  1,  1, -1,  1, -1,  1,  1,  1,  1,  0, ...
+    1, -1, -1,  1,  1, -1,  1, -1,  1, -1, -1, -1, -1, -1, ...
+    1,  1, -1, -1,  1, -1,  1, -1,  1,  1,  1,  1];
 ltf_f = zeros(1, Nfft);
 ltf_f(mod(ltf_k, Nfft) + 1) = ltf_v;                   % DC 自动为 0
 
 assert(abs(sum(abs(stf_f).^2) - sum(abs(ltf_f).^2)) < 1e-9, ...
-       'STF 与 LTF 的频域总功率必须相等（sqrt(13/6) 保证这一点）');
+    'STF 与 LTF 的频域总功率必须相等（sqrt(13/6) 保证这一点）');
 
-% ---------------- 频域补零上采样（与 DATA 字段一致）----------------
+% ---------------- 频域补零上采样 ----------------
 pad = zeros(1, Nup - Nfft);                           % 中间补 64 个零
 stf_f = [stf_f(1:Nfft/2), pad, stf_f(Nfft/2+1:end)];
 ltf_f = [ltf_f(1:Nfft/2), pad, ltf_f(Nfft/2+1:end)];
@@ -77,31 +77,31 @@ assert(numel(preamble_waveform) == expected_len, ...
 assert(isequal(ltf(1:os*2*Nsh), ltf_t(os*Nlt/2+1:end)), ...
     'GI2 应为长符号的后 64 点');
 
-% ================= 原 preambleone_fixed.m 的绘图（保持不变）================
+% ================= 原 preambleone_fixed.m 的绘图================
 if plot_enable
     Fs = sample_rate_hz;
     preamble = preamble_waveform;
     G = os;
     rmsv = @(x) sqrt(mean(abs(x).^2));
     papr = @(x) 10*log10(max(abs(x).^2) / mean(abs(x).^2));
-
+    
     % ---- 5. 校验与指标 ----
     fprintf('总样本 %d（%.2f us）| STF %.2f us + LTF %.2f us\n', ...
-            numel(preamble), numel(preamble)/Fs*1e6, numel(stf)/Fs*1e6, numel(ltf)/Fs*1e6);
+        numel(preamble), numel(preamble)/Fs*1e6, numel(stf)/Fs*1e6, numel(ltf)/Fs*1e6);
     fprintf('STF 周期 %d 样本（%.2f us）| 平均功率 %.6f | PAPR %.2f dB\n', ...
-            32, 32/Fs*1e6, mean(abs(preamble).^2), papr(preamble));
+        32, 32/Fs*1e6, mean(abs(preamble).^2), papr(preamble));
     fprintf('\n         %8s %8s %9s %9s\n', 'RMS', '峰值', '峰值/RMS', 'PAPR/dB');
     fprintf('STF      %8.4f %8.4f %9.3f %9.2f\n', ...
-            rmsv(stf), max(abs(stf)), max(abs(stf))/rmsv(stf), papr(stf));
+        rmsv(stf), max(abs(stf)), max(abs(stf))/rmsv(stf), papr(stf));
     fprintf('LTF      %8.4f %8.4f %9.3f %9.2f\n', ...
-            rmsv(ltf), max(abs(ltf)), max(abs(ltf))/rmsv(ltf), papr(ltf));
+        rmsv(ltf), max(abs(ltf)), max(abs(ltf))/rmsv(ltf), papr(ltf));
     fprintf('峰值差   %8s %8s %9s %7.2f dB\n', '', '', '', ...
-            20*log10(max(abs(ltf))/max(abs(stf))));
-
+        20*log10(max(abs(ltf))/max(abs(stf))));
+    
     % ---- 6. 时域：整体 / STF / LTF 分开画 ----
     t  = (0:numel(preamble)-1)/Fs*1e6;
     pk = 1.1*max(abs(preamble));
-
+    
     figure('Color','w','Name','802.11a preamble @ 40 MHz');
     subplot(3,1,1);
     plot(t, abs(preamble), 'b', 'LineWidth', 1.1); hold on;
@@ -111,7 +111,7 @@ if plot_enable
     xlabel('时间 (\mus)'); ylabel('|x[n]|');
     legend('|x[n]|', 'RMS', 'STF / LTF 分界', 'Location', 'northeast');
     title(sprintf('完整前导：10 个 L-STF + GI2 + 2 个 L-LTF（640 样本 / 16 \\mus）PAPR=%.2f dB', papr(preamble)));
-
+    
     subplot(3,1,2);
     plot((0:numel(stf)-1)/Fs*1e6, abs(stf), 'b', 'LineWidth', 1.1); hold on;
     plot([0 8], [rmsv(stf) rmsv(stf)], 'm--', 'LineWidth', 1);
@@ -119,8 +119,8 @@ if plot_enable
     grid on; xlim([0 8]); ylim([0 pk]);
     xlabel('时间 (\mus)'); ylabel('|x[n]|');
     title(sprintf('L-STF：10 个 0.8 \\mus 短符号（周期 32 样本）峰值 %.4f，PAPR %.2f dB', ...
-                  max(abs(stf)), papr(stf)));
-
+        max(abs(stf)), papr(stf)));
+    
     subplot(3,1,3);
     plot((0:numel(ltf)-1)/Fs*1e6, abs(ltf), 'b', 'LineWidth', 1.1); hold on;
     plot([0 8], [rmsv(ltf) rmsv(ltf)], 'm--', 'LineWidth', 1);
@@ -128,25 +128,25 @@ if plot_enable
     grid on; xlim([0 8]); ylim([0 pk]);
     xlabel('时间 (\mus)'); ylabel('|x[n]|');
     title(sprintf('L-LTF：GI2 1.6 \\mus + 2 个 3.2 \\mus 长符号 峰值 %.4f，PAPR %.2f dB', ...
-                  max(abs(ltf)), papr(ltf)));
-
+        max(abs(ltf)), papr(ltf)));
+    
     % ---- 7. 频域：补零后的线谱 ----
     fM = (-Nup/2:Nup/2-1) * (Fs/Nup)/1e6;
-
+    
     figure('Color','w','Name','802.11a preamble spectrum @ 40 MHz');
     subplot(2,1,1);
     stem(fM, abs(fftshift(fft(stf_t))), 'filled', 'MarkerSize', 4);
     grid on; xlim([-20 20]); xlabel('频率 (MHz)'); ylabel('|X[k]|');
     title('L-STF 频谱：12 根谱线，间隔 4x312.5 kHz = 1.25 MHz，|f|>=10 MHz 为补零区');
-
+    
     subplot(2,1,2);
     stem(fM, abs(fftshift(fft(ltf_t))), 'filled', 'MarkerSize', 4);
     grid on; xlim([-20 20]); xlabel('频率 (MHz)'); ylabel('|X[k]|');
     title('L-LTF 频谱：52 根谱线，间隔 312.5 kHz（±26，DC 置零）');
-
+    
     % ---- 8. PSD：前导自身 vs 长随机载荷 ----
     [Pxx, fp] = pwelch(preamble, hann(256,'periodic'), 128, 512, Fs, 'centered');
-
+    
     rng(0);
     idx_data  = [-26:-22, -20:-8, -6:-1, 1:6, 8:20, 22:26];
     idx_pilot = [-21 -7 7 21];
@@ -161,20 +161,20 @@ if plot_enable
         xpay((m-1)*nPer + (1:nPer)) = [xs(end-31:end), xs];
     end
     [Ppay, fpay] = pwelch(xpay, hann(512,'periodic'), 384, 2048, Fs, 'centered');
-
+    
     d1 = 10*log10(Pxx); d1 = d1 - max(d1(abs(fp) <= 7.5e6));
     d2 = 10*log10(Ppay); d2 = d2 - max(d2(abs(fpay) <= 7.5e6));
     b1 = abs(fp)   <= 7.5e6;
     b2 = abs(fpay) <= 7.5e6;
     fprintf('\n前导 PSD 带内起伏：std %.2f dB，峰谷 %.1f dB\n', std(d1(b1)), max(d1(b1))-min(d1(b1)));
     fprintf('随机载荷 PSD 带内起伏：std %.2f dB，峰谷 %.1f dB\n', std(d2(b2)), max(d2(b2))-min(d2(b2)));
-
+    
     figure('Color','w','Name','PSD: preamble vs random payload');
     subplot(2,1,1);
     plot(fp/1e6, d1, 'k'); grid on; xlim([-20 20]); ylim([-45 5]);
     xlabel('频率 (MHz)'); ylabel('归一化 PSD (dB)');
     title(sprintf('16 \\mus 前导的 PSD：4 段 Welch，带内 std %.1f dB（1.25 MHz 周期的梳齿状起伏）', std(d1(b1))));
-
+    
     subplot(2,1,2);
     plot(fpay/1e6, d2, 'b'); grid on; xlim([-20 20]); ylim([-45 5]);
     xlabel('频率 (MHz)'); ylabel('归一化 PSD (dB)');

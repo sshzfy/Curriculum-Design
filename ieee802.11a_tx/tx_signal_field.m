@@ -1,5 +1,5 @@
 function varargout = tx_signal_field(sample_rate_hz, length_bytes, plot_enable)
-%tx_signal_field  SIGNAL 字段，40 MHz 复基带（含 2 倍频域上采样）。
+%tx_signal_field  SIGNAL 字段
 %
 %   用法一（接口，供组帧调用）：
 %     sig = tx_signal_field(40e6, 130)            生成并绘图，返回 40 MHz 波形
@@ -24,7 +24,7 @@ function varargout = tx_signal_field(sample_rate_hz, length_bytes, plot_enable)
 %     2) 采用标准两级交织 output[i(k)] = input[k]；
 %     3) 频域中间补零到 128 点 + 128 点 IFFT（×2）上采样到 40 MHz，CP 32 点。
 
-% ---------------- 默认参数（保证可独立运行）----------------
+% ---------------- 默认参数----------------
 if nargin < 1 || isempty(sample_rate_hz), sample_rate_hz = 40e6; end
 if nargin < 2 || isempty(length_bytes),   length_bytes   = 130;  end
 if nargin < 3 || isempty(plot_enable),    plot_enable    = true; end
@@ -74,7 +74,7 @@ freq_64 = zeros(1, Nfft);
 freq_64(mod(data_sub_idx, Nfft) + 1) = mod_symbols;
 freq_64(mod(pilot_sub_idx, Nfft) + 1) = pilot_values;
 
-% ---------------- 20 MHz 基带过程（原 signal.m 的 64 点 IFFT + 16 点 CP）----------------
+% ---------------- 20 MHz 基带过程----------------
 time_domain_20 = ifft(freq_64, Nfft);                 % 64 点 @ 20 MHz
 cp_20 = 16;
 time_domain_cp_20 = [time_domain_20(end-cp_20+1:end), time_domain_20];   % 80 点
@@ -98,31 +98,31 @@ assert(numel(coded_bits) == 48, '卷积编码后应为 48 bit');
 assert(numel(signal_waveform) == expected_len, ...
     sprintf('SIGNAL 长度应为 %d 点，实际 %d 点', expected_len, numel(signal_waveform)));
 
-% ================= 原 signal.m 的绘图（保持不变）================
+% ================= 原 signal.m 的绘图 ================
 if plot_enable
     figure('Name', 'IEEE 802.11a SIGNAL 域生成过程', 'Position', [50 50 1500 950]);
-
+    
     % (1) SIGNAL 域 24 bit
     subplot(4,2,1);
     stem(0:length(signal_bits)-1, signal_bits, 'filled', 'MarkerSize', 6);
     title('SIGNAL 域比特 (24 bit)');
     xlabel('比特索引 (0 ~ 23)'); ylabel('逻辑值');
     xticks(0:2:24); ylim([-0.5 1.5]); grid on;
-
+    
     % (2) 卷积编码后 48 bit
     subplot(4,2,2);
     stem(0:length(coded_bits)-1, coded_bits, 'filled', 'MarkerSize', 4);
     title('卷积编码后比特 (48 bit)');
     xlabel('比特索引 (0 ~ 47)'); ylabel('逻辑值');
     xticks(0:4:48); ylim([-0.5 1.5]); grid on;
-
+    
     % (3) 交织后 48 bit
     subplot(4,2,3);
     stem(0:length(interleaved_bits)-1, interleaved_bits, 'filled', 'MarkerSize', 4);
     title('交织后比特 (48 bit)');
     xlabel('比特索引 (0 ~ 47)'); ylabel('逻辑值');
     xticks(0:4:48); ylim([-0.5 1.5]); grid on;
-
+    
     % (4) BPSK 星座图
     subplot(4,2,4);
     plot(real(mod_symbols), imag(mod_symbols), 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r');
@@ -130,14 +130,14 @@ if plot_enable
     xlabel('I 路幅度'); ylabel('Q 路幅度');
     xticks([-1.5 -1 0 1 1.5]); yticks([-1.5 -1 0 1 1.5]);
     xlim([-1.5 1.5]); ylim([-1.5 1.5]); grid on;
-
+    
     % (5) 频域符号幅度
     subplot(4,2,5);
     stem(-32:31, abs(fftshift(freq_64)), 'filled', 'MarkerSize', 4);
     title('频域符号幅度 (64 点)');
     xlabel('子载波索引 (-32 ~ 31)'); ylabel('幅度');
     xticks(-32:4:32); xlim([-34 34]); grid on;
-
+    
     % (6) IFFT 后时域符号 (64 点)
     subplot(4,2,6);
     plot(0:Nfft-1, real(time_domain_20), 'b-', 'LineWidth', 1.5); hold on;
@@ -146,7 +146,7 @@ if plot_enable
     xlabel('采样点 (0 ~ 63)'); ylabel('幅度');
     xticks(0:4:64); xlim([0 63]); grid on;
     legend('I 路', 'Q 路');
-
+    
     % (7) 添加 CP 后的时域符号 (80 点)
     subplot(4,2,7);
     plot(0:length(time_domain_cp_20)-1, real(time_domain_cp_20), 'b-', 'LineWidth', 1.5); hold on;
@@ -160,7 +160,7 @@ if plot_enable
     xlabel('采样点 (0 ~ 79)'); ylabel('幅度');
     xticks(0:4:80); xlim([0 79]); grid on;
     legend('I 路', 'Q 路', 'Location', 'southwest');
-
+    
     % (8) CP 重复验证 (16 点)
     subplot(4,2,8);
     plot(0:cp_20-1, real(time_domain_20(end-cp_20+1:end)), 'bo-', 'LineWidth', 2, 'MarkerFaceColor', 'b'); hold on;
@@ -169,7 +169,7 @@ if plot_enable
     xlabel('采样点 (0 ~ 15)'); ylabel('幅度');
     xticks(0:1:15); xlim([-0.5 15.5]); grid on;
     legend('原符号最后 16 点', 'CP 中的 16 点', 'Location', 'best');
-
+    
     sgtitle(sprintf('IEEE 802.11a SIGNAL 域生成过程 (LENGTH = %d, 6Mbps)', length_bytes));
 end
 

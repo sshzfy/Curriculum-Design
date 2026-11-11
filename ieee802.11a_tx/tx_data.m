@@ -1,10 +1,15 @@
 function [data_field_waveform, sample_rate_hz, oversampled_fft_size, cyclic_prefix_length, ofdm_symbols_with_cp] = ...
-    tx_data(plot_enable)
+    tx_data(plot_enable, payload_bytes, repeat_count)
 %tx_data  生成 IEEE 802.11a 6 Mbps DATA 字段的复基带波形（40 MHz，含循环前缀）。
 %
 %   [wave, fs, nfft_os, cp_len, syms] = tx_data(plot_enable)
+%   [wave, fs, nfft_os, cp_len, syms] = tx_data(plot_enable, payload_bytes, repeat_count)
 %
-%   输入 plot_enable：true 时绘制过程图（默认 true）；false 时不绘图。
+%   输入：
+%     plot_enable  - true 时绘制过程图（默认 true）。
+%     payload_bytes- 发送数据字节向量（默认 uint8(1:130)），可为行/列向量。
+%     repeat_count - 数据重复次数（默认 8）。
+%
 %   输出：
 %     wave   - 串行 DATA 字段复基带波形（行向量，1×Nsample）
 %     fs     - 采样率（Hz，40 MHz）
@@ -27,10 +32,22 @@ code_rate = 1/2;               % 编码效率
 bits_per_byte = 8;
 service_bit_count = 16;        % SERVICE 字段位数
 tail_bit_count = 6;            % TAIL 字段位数
-repeat_count = 8;              % 重复次数
-
 %% 原始数据生成
-payload_bytes = uint8(1:130);                                       % 原始数据 1~130
+if nargin < 2 || isempty(payload_bytes)
+    payload_bytes = uint8(1:130);
+else
+    validateattributes(payload_bytes, {'numeric'}, ...
+        {'vector', 'nonempty', 'real', 'finite', 'integer', '>=', 0, '<=', 255});
+    payload_bytes = uint8(payload_bytes(:).');
+end
+
+if nargin < 3 || isempty(repeat_count)
+    repeat_count = 8;
+else
+    validateattributes(repeat_count, {'numeric'}, ...
+        {'scalar', 'integer', 'positive'});
+end
+
 repeated_payload_bytes = repmat(payload_bytes, 1, repeat_count);    % 重复发送
 
 payload_bit_matrix = int2bit(repeated_payload_bytes, bits_per_byte, false);    % 按列输出每个字节的 8 个位（第一行为最低有效位）
